@@ -73,7 +73,7 @@ class PlayerRow:
         self.include_cb.grid(row=self.row, column=2, padx=2, pady=2)
 
         for h in range(HOLES):
-            e = tk.Entry(self.parent, textvariable=self.score_vars[h], width=3)
+            e = ttk.Entry(self.parent, textvariable=self.score_vars[h], width=3)
             col = 3 + h if h < 9 else 4 + h
             e.grid(row=self.row, column=col, padx=1, pady=2)
             try:
@@ -127,10 +127,14 @@ class PlayerRow:
             val = self.score_vars[i].get().strip()
             if val == "":
                 try:
-                    default = self.score_entry_defaults[i]
-                    ent.config(bg=default if default is not None else 'white')
+                    # reset to default themed entry style when empty
+                    ent.configure(style='TEntry')
                 except Exception:
-                    pass
+                    try:
+                        default = self.score_entry_defaults[i]
+                        ent.config(bg=default if default is not None else 'white')
+                    except Exception:
+                        pass
                 continue
             try:
                 score = int(val)
@@ -142,20 +146,29 @@ class PlayerRow:
                 par_v = 4
             if score == par_v - 1:
                 try:
-                    ent.config(bg="#FFF59D")
+                    ent.configure(style='Birdie.TEntry')
                 except Exception:
-                    pass
+                    try:
+                        ent.config(bg="#FFF59D")
+                    except Exception:
+                        pass
             elif score <= par_v - 2:
                 try:
-                    ent.config(bg="#C8E6C9")
+                    ent.configure(style='Eagle.TEntry')
                 except Exception:
-                    pass
+                    try:
+                        ent.config(bg="#C8E6C9")
+                    except Exception:
+                        pass
             else:
                 try:
-                    default = self.score_entry_defaults[i]
-                    ent.config(bg=default if default is not None else 'white')
+                    ent.configure(style='TEntry')
                 except Exception:
-                    pass
+                    try:
+                        default = self.score_entry_defaults[i]
+                        ent.config(bg=default if default is not None else 'white')
+                    except Exception:
+                        pass
 
     def destroy(self):
         try:
@@ -258,13 +271,41 @@ class BigBoySkinsApp:
                       font=("Segoe UI", 14, "bold"))
         title_lbl.grid(row=0, column=0, sticky="w", padx=12, pady=(8, 4))
 
-        header = ttk.Frame(self.root)
-        header.grid(row=1, column=0, sticky="w", padx=10, pady=5)
-        # add internal padding to the header and increase gaps between widgets
+        # Header frame for tournament details. Make it expand horizontally
+        # so it matches the player information grid width.
         header = ttk.Frame(self.root, padding=(12, 8))
-        header.grid(row=1, column=0, sticky="w", padx=12, pady=8)
+        header.grid(row=1, column=0, sticky="ew", padx=12, pady=8)
+        # ensure root column 0 expands and allow header columns to stretch
+        self.root.columnconfigure(0, weight=1)
+        header.columnconfigure(0, weight=1)
+        header.columnconfigure(13, weight=1)
         style = ttk.Style()
-        style.configure('.', font=('Segoe UI', 11))
+        # Use the platform default theme and avoid forcing background colors so
+        # widgets follow the system look-and-feel (including player entries).
+        try:
+            style.theme_use('default')
+        except Exception:
+            pass
+        # define theme-friendly styles for birdie/eagle highlighting. Use
+        # fieldbackground so ttk.Entry widgets pick up the color under themes
+        # that support it. These are best-effort and will silently continue
+        # to work even if the current theme ignores entry styling.
+        try:
+            style.configure('Birdie.TEntry', fieldbackground='#FFF59D')
+            style.configure('Eagle.TEntry', fieldbackground='#C8E6C9')
+            # default entry style alias (no-op if theme provides 'TEntry')
+            style.configure('TEntry')
+        except Exception:
+            pass
+        # Only set a neutral default font for the UI; don't override background
+        # or foreground colors so the theme controls appearance.
+        try:
+            style.configure('.', font=('Segoe UI', 11))
+            # Keep a named frame style available but don't force its background.
+            style.configure('White.TFrame')
+        except Exception:
+            # if styling isn't supported on this platform/theme, continue safely
+            pass
         self.root.columnconfigure(0, weight=1)
         header.columnconfigure(1, weight=2)
         header.columnconfigure(3, weight=1)
@@ -318,6 +359,7 @@ class BigBoySkinsApp:
         # allow the canvas (row 0) to expand vertically when the window is resized
         container.rowconfigure(0, weight=1)
 
+        # Canvas: don't force a background color so the platform default is used
         self.player_canvas = tk.Canvas(container, highlightthickness=0)
         self.player_vscroll = ttk.Scrollbar(container, orient="vertical", command=self.player_canvas.yview)
         self.player_canvas.configure(yscrollcommand=self.player_vscroll.set)
@@ -325,8 +367,8 @@ class BigBoySkinsApp:
         self.player_canvas.grid(row=0, column=0, sticky="nsew")
         self.player_vscroll.grid(row=0, column=1, sticky="ns")
 
-        # inner frame where rows live
-        self.player_inner = ttk.Frame(self.player_canvas)
+        # inner frame where rows live (use default theme styling)
+        self.player_inner = ttk.Frame(self.player_canvas)  
         self.player_inner_id = self.player_canvas.create_window((0, 0), window=self.player_inner, anchor='nw')
 
         # column weights on inner frame (same as previous player_frame)
@@ -364,13 +406,13 @@ class BigBoySkinsApp:
         ttk.Label(self.player_inner, text="Par:").grid(row=0, column=0, sticky="w")
         for i in range(HOLES):
             col = 3 + i if i < 9 else 4 + i
-            tk.Entry(self.player_inner, textvariable=self.par_vars[i], width=3).grid(row=0, column=col)
+            ttk.Entry(self.player_inner, textvariable=self.par_vars[i], width=3).grid(row=0, column=col)
 
         # Stroke Index row
         ttk.Label(self.player_inner, text="Stroke Index:").grid(row=1, column=0, sticky="w")
         for i in range(HOLES):
             col = 3 + i if i < 9 else 4 + i
-            tk.Entry(self.player_inner, textvariable=self.stroke_index_vars[i], width=3).grid(row=1, column=col)
+            ttk.Entry(self.player_inner, textvariable=self.stroke_index_vars[i], width=3).grid(row=1, column=col)
 
         # Header row
         ttk.Label(self.player_inner, text="Name").grid(row=2, column=0)
@@ -391,6 +433,7 @@ class BigBoySkinsApp:
 
         for _ in range(2):
             self.add_player()
+
 
     def _adjust_height(self):
         """Increase window height so player rows are visible. Caps at screen height minus a margin.
@@ -438,12 +481,42 @@ class BigBoySkinsApp:
                     geom = self.root.winfo_geometry()
                     cur_w = int(geom.split('x')[0])
                 except Exception:
-                    cur_w = 2040
+                    # use a sensible default width instead of a very large value
+                    # which can cause the window to be too wide on macOS
+                    cur_w = 1200
 
             self.root.geometry(f"{cur_w}x{int(new_h)}")
         except Exception:
             # non-fatal; don't block adding players if resizing fails
             pass
+
+    # def _apply_light_theme_to_children(self, parent):
+        # """Recursively force a light background on common widgets under `parent`.
+
+        # Attempts to set explicit white background and black foreground on tk/ttk
+        # widgets so the player table remains readable in macOS dark mode. This is
+        # defensive and will silently continue if a widget does not accept the
+        # configuration.
+        # """
+        # # We've moved away from forcing white backgrounds. Keep this helper
+        # # minimal and only ensure ttk.Entry widgets use the theme's entry style
+        # # (no background/foreground overrides) so the default theme is applied
+        # # consistently across the UI.
+        # try:
+            # for child in parent.winfo_children():
+                # try:
+                    # try:
+                        # if isinstance(child, ttk.Entry):
+                            # child.configure(style='TEntry')
+                    # except Exception:
+                        # pass
+
+                    # if child.winfo_children():
+                        # self._apply_light_theme_to_children(child)
+                # except Exception:
+                    # continue
+        # except Exception:
+            # pass
 
     def add_player(self):
         if len(self.players) >= MAX_PLAYERS:
@@ -452,6 +525,11 @@ class BigBoySkinsApp:
         idx = len(self.players)
         row = PlayerRow(self.player_inner, idx, self)
         self.players.append(row)
+        # Ensure newly created row widgets inherit the light background
+        # try:
+            # self._apply_light_theme_to_children(self.player_inner)
+        # except Exception:
+            # pass
         # adjust window height so new row is visible (capped to screen size)
         try:
             self._adjust_height()
@@ -865,10 +943,34 @@ class BigBoySkinsApp:
                         carry += 1
             carryover_remaining = carry
 
-        if total_purse is not None and total_purse > 0:
-            total_units = sum(payout_map_units.values())
-            per_unit = (total_purse / total_units) if total_units > 0 else 0.0
-        else:
+        # Determine per-unit (per-skin) payout.
+        # Priority: if a Total Purse is provided use it; otherwise use the computed
+        # Total Pot (buy-in * number of participants). If neither yields a positive
+        # fund, fall back to the user-entered Per Skin value.
+        per_unit = per_skin_input
+        try:
+            # compute total fund from Total Purse (if present) or Total Pot (buy-in * participants)
+            total_fund = None
+            if total_purse is not None and float(total_purse) > 0:
+                total_fund = float(total_purse)
+            else:
+                try:
+                    buy_in_val = float(self.buy_in_var.get() or 0)
+                except Exception:
+                    buy_in_val = 0.0
+                try:
+                    participants_count = int(included.shape[0]) if included is not None else 0
+                except Exception:
+                    participants_count = 0
+                total_pot = buy_in_val * participants_count
+                if total_pot > 0:
+                    total_fund = total_pot
+
+            if total_fund is not None and total_fund > 0:
+                total_units = sum(payout_map_units.values())
+                per_unit = (total_fund / total_units) if total_units > 0 else 0.0
+        except Exception:
+            # keep fallback per_skin_input on any error
             per_unit = per_skin_input
 
         payout_map_amount = {name: round(payout_map_units[name] * per_unit, 2) for name in payout_map_units}
@@ -1206,7 +1308,7 @@ class BigBoySkinsApp:
                         birdie_map[name] += 1
                     elif score <= parv - 2:
                         eagle_map[name] += 1
-
+            # write player summary header
             r += 1
             summary.cell(row=r, column=1 + col_off, value="Player").font = Font(bold=True)
             summary.cell(row=r, column=2 + col_off, value="Total Units").font = Font(bold=True)
