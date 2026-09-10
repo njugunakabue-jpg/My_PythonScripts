@@ -54,6 +54,11 @@ class PlayerRow:
         self.name_var = tk.StringVar()
         self.handicap_var = tk.StringVar(value="0")
         self.include_var = tk.BooleanVar(value=True)
+        # Notify app when inclusion changes so total pot updates
+        try:
+            self.include_var.trace_add("write", lambda *a: self.app.update_total_pot())
+        except Exception:
+            pass
         self.score_vars = [tk.StringVar(value="") for _ in range(HOLES)]
         self.score_entries = []
         self.score_entry_defaults = []
@@ -219,7 +224,26 @@ class BigBoySkinsApp:
         self.course_var = self.course_name_var
         self.date_var = tk.StringVar()
         self.per_skin_var = tk.StringVar(value="1")
+        # Register a write trace to keep Per Skin formatted to 2 decimals.
+        # Use trace_add when available, fall back to legacy trace API for older Tk versions.
+        try:
+            self.per_skin_var.trace_add("write", lambda *a: self._format_per_skin_var())
+        except Exception:
+            try:
+                self.per_skin_var.trace('w', lambda *a: self._format_per_skin_var())
+            except Exception:
+                pass
         self.total_purse_var = tk.StringVar(value="")
+        self.buy_in_var = tk.StringVar(value="0")
+        self.total_pot_var = tk.StringVar(value="0")
+        # Keep buy-in changes reflected in Total Pot. Use trace_add then fall back to legacy trace.
+        try:
+            self.buy_in_var.trace_add("write", lambda *a: self.update_total_pot())
+        except Exception:
+            try:
+                self.buy_in_var.trace('w', lambda *a: self.update_total_pot())
+            except Exception:
+                pass
         self.carryover_var = tk.BooleanVar(value=True)
         self.bonus_enabled_var = tk.BooleanVar(value=True)
         self.par_vars = [tk.StringVar(value="4") for _ in range(HOLES)]
@@ -274,6 +298,12 @@ class BigBoySkinsApp:
         ttk.Entry(header, textvariable=self.total_purse_var, width=10).grid(row=0, column=7, sticky="ew", padx=(0,12), pady=4)
         ttk.Checkbutton(header, text='Carryover', variable=self.carryover_var).grid(row=0, column=8, padx=(6,8), pady=4)
         ttk.Checkbutton(header, text='Apply Birdie/Eagle Bonuses', variable=self.bonus_enabled_var).grid(row=0, column=9, padx=(0,8), pady=4)
+
+        # Buy-in and Total Pot
+        ttk.Label(header, text="Buy-in $").grid(row=0, column=10, padx=(6,4), pady=4)
+        ttk.Entry(header, textvariable=self.buy_in_var, width=8).grid(row=0, column=11, sticky="ew", padx=(0,12), pady=4)
+        ttk.Label(header, text="Total Pot $").grid(row=0, column=12, padx=(6,4), pady=4)
+        ttk.Label(header, textvariable=self.total_pot_var).grid(row=0, column=13, padx=(0,12), pady=4)
 
         #ttk.Checkbutton(header, text="Use Net Scores (based on handicap)", variable=self.use_net_scores).grid(row=1, column=0, columnspan=2, sticky="w")
         #ttk.Checkbutton(header, text="Split Ties (instead of carryover)", variable=self.split_ties).grid(row=1, column=2, columnspan=2, sticky="w")
@@ -427,6 +457,10 @@ class BigBoySkinsApp:
             self._adjust_height()
         except Exception:
             pass
+        try:
+            self.update_total_pot()
+        except Exception:
+            pass
 
     def collect_data(self):
         pars = []
@@ -454,6 +488,44 @@ class BigBoySkinsApp:
                         d[key] = ""
             player_dicts.append(d)
         return pars, player_dicts
+
+    def update_total_pot(self):
+        """Compute total pot = buy_in * number of players marked Included with a name."""
+        try:
+            buy = float(self.buy_in_var.get() or 0)
+        except Exception:
+            buy = 0.0
+        count = 0
+        for p in self.players:
+            try:
+                if p.include_var.get() and p.name_var.get().strip() != "":
+                    count += 1
+            except Exception:
+                continue
+        total = buy * count
+        # format to 2 decimal places
+        try:
+            if float(total).is_integer():
+                self.total_pot_var.set(str(int(total)))
+            else:
+                self.total_pot_var.set(f"{total:.2f}")
+        except Exception:
+            self.total_pot_var.set(str(total))
+
+    def _format_per_skin_var(self):
+        """Ensure the Per Skin entry shows two decimal places."""
+        try:
+            v = self.per_skin_var.get().strip()
+            if v == "":
+                return
+            fv = float(v)
+            formatted = f"{fv:.2f}"
+            if v != formatted:
+                # avoid triggering trace recursion by only setting when changed
+                self.per_skin_var.set(formatted)
+        except Exception:
+            # leave value as-is if it can't be parsed
+            pass
 
     def _format_bonus_summary(self, hole_result):
         bonus_map = hole_result.get("gross_bonus_map") or hole_result.get("bonus_map") or {}
@@ -858,7 +930,11 @@ class BigBoySkinsApp:
         except Exception:
             ws.cell(row=3, column=2 + col_off, value=self.date_var.get().strip())
         ws.cell(row=2, column=4 + col_off, value="Per-skin $")
-        ws.cell(row=2, column=5 + col_off, value=float(per_skin))
+        cell_per_skin = ws.cell(row=2, column=5 + col_off, value=round(float(per_skin), 2))
+        try:
+            cell_per_skin.number_format = '$#,##0.00'
+        except Exception:
+            pass
 
         tp = self.total_purse_var.get().strip()
         if tp != "":
@@ -1053,11 +1129,30 @@ class BigBoySkinsApp:
             def srow(k, v):
                 nonlocal r
                 summary.cell(row=r, column=1 + col_off, value=k)
-                summary.cell(row=r, column=2 + col_off, value=v)
+                # write the value; for numeric currency-like values, ensure rounding
+                try:
+                    if any(term in str(k).lower() for term in ("per-skin", "total purse", "buy-in", "total pot", "amount")):
+                        # attempt to coerce to float and round to 2 decimals
+                        try:
+                            fv = float(v)
+                            val_cell = summary.cell(row=r, column=2 + col_off, value=round(fv, 2))
+                        except Exception:
+                            # fallback: write as string but still attempt to set number format
+                            val_cell = summary.cell(row=r, column=2 + col_off, value=str(v) if v is not None else None)
+                    else:
+                        val_cell = summary.cell(row=r, column=2 + col_off, value=v)
+                except Exception:
+                    val_cell = summary.cell(row=r, column=2 + col_off, value=v)
                 # add border to summary entries
                 try:
                     summary.cell(row=r, column=1 + col_off).border = bd
                     summary.cell(row=r, column=2 + col_off).border = bd
+                    # format currency-like fields to two decimals in Excel regardless of Python type
+                    if any(term in str(k).lower() for term in ("per-skin", "total purse", "buy-in", "total pot", "amount")):
+                        try:
+                            val_cell.number_format = '$#,##0.00'
+                        except Exception:
+                            pass
                 except Exception:
                     pass
                 r += 1
@@ -1073,6 +1168,18 @@ class BigBoySkinsApp:
                     srow("Total Purse $", float(tp))
                 except Exception:
                     srow("Total Purse $", tp)
+            # Buy-in and computed total pot (buy-in * number of participants)
+            try:
+                buy_in_val = float(self.buy_in_var.get() or 0)
+            except Exception:
+                buy_in_val = 0.0
+            try:
+                participants_df = df[df.get("Included") == True]
+                total_pot_val = buy_in_val * len(participants_df)
+            except Exception:
+                total_pot_val = 0.0
+            srow("Buy-in $", float(buy_in_val))
+            srow("Total Pot $", float(total_pot_val))
             srow("Carryover Enabled", str(self.carryover_var.get()))
             srow("Use Net Scores", str(self.use_net_scores.get()))
             srow("Bonuses Enabled", str(self.bonus_enabled_var.get()))
@@ -1341,6 +1448,11 @@ class BigBoySkinsApp:
                 self.players.append(pr)
             while len(self.players) < 2:
                 self.add_player()
+            # recompute total pot now that players list is populated
+            try:
+                self.update_total_pot()
+            except Exception:
+                pass
             # adjust height after import so all imported rows are visible
             try:
                 self._adjust_height()
